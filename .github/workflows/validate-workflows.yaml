@@ -1,0 +1,169 @@
+name: Validate GitHub workflows
+on:
+  workflow_call:
+    inputs:
+      uses_reviewdog_actionlint:
+        description: |
+          Determine if reviewdog/action-actionlint@v1 should be used.
+        type: boolean
+        default: true
+        required: false
+      validate_file_extensions:
+        description: |
+          Check that the workflow file has the correct YAML filename extension
+          (see also yaml_filename_extension)
+        type: boolean
+        default: true
+        required: false
+      yaml_filename_extension:
+        description: |
+          The required YAML filename extension (no leading dot).
+        type: string
+        default: 'yaml'
+        required: false
+      debug:
+        description: |
+          Show debug information.
+        type: boolean
+        default: false
+        required: false
+
+jobs:
+  build:
+    name: Validation
+    runs-on: ubuntu-24.04-arm
+    steps:
+      # Git checkout, beware that this is done with --depth=1; which makes
+      # commands like git-describe return only a hash, not the previous
+      # revision string, because git has no connectivity information.  It
+      # also makes the build incapable of generating a short log...
+      - name: Git -- sparse-checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            .github
+
+      - name: Run actionlint
+        if: ${{ inputs.uses_reviewdog_actionlint }}
+        uses: reviewdog/action-actionlint@v1
+
+      - name: Create filename check script
+        if: ${{ inputs.validate_file_extensions }}
+        run: |
+          cat <<- 'EOF' > "${RUNNER_TEMP}/check-workflow-file-extensions.sh"
+          #!/bin/bash
+
+          # Sanity check the GitHub workflow file extensions.
+          set -e
+
+          # Case of YAML filenames (including extension) might vary.
+          shopt -s nocaseglob
+
+          # Do not pass the pattern if no file match.
+          shopt -s nullglob
+
+          if [ -z "$YAML_FILENAME_EXTENSION" ]; then
+            YAML_FILENAME_EXTENSION="yaml"
+          fi
+
+          for f in *.yaml *.yml; do
+              DIRNAME="$(dirname $f)"
+              FILENAME="$(basename $f)"
+              FILE_NO_EXT="${f%.*}"
+              FILE_EXT="${f##*.}"
+              echo "Checking file ${FILENAME}"
+
+              if [ "$DEBUG" = 'true' ]; then
+                  echo "DIRNAME: ${DIRNAME}"
+                  echo "FILENAME: ${FILENAME}"
+                  echo "FILE_NO_EXT: ${FILE_NO_EXT}"
+                  echo "FILE_EXT: ${FILE_EXT}"
+              fi
+              if [ "$FILE_EXT" != "${YAML_FILENAME_EXTENSION}" ]; then
+                  echo "Please rename ${FILENAME} to ${FILE_NO_EXT}.${YAML_FILENAME_EXTENSION}"
+                  FOUND_ERRORS=1
+              fi
+          done
+
+          if [ "$FOUND_ERRORS" ]; then
+              exit 1
+          fi
+          EOF
+
+      - name: Cat filename file script
+        if: ${{ inputs.validate_file_extensions && inputs.debug }}
+        run: |
+          cat "${RUNNER_TEMP}/check-workflow-file-extensions.sh"
+
+      - name: Check file extensions
+        if: ${{ inputs.validate_file_extensions }}
+        working-directory: ./.github/workflows
+        env:
+          DEBUG: ${{ inputs.debug }}
+          YAML_FILENAME_EXTENSION: ${{ inputs.yaml_filename_extension }}
+        run: |
+          bash "${RUNNER_TEMP}/check-workflow-file-extensions.sh"
+
+      - name: APT update
+        run: |
+          sudo apt update
+
+      - name: Install yamllint
+        run: |
+          sudo apt -y install yamllint
+
+      - name: Create default yamllint config file
+        run: |
+          cat <<- 'EOF' > "${RUNNER_TEMP}/yamllint"
+          ---
+
+          yaml-files:
+            - '*.yaml'
+            - '*.yml'
+            - '.yamllint'
+
+          rules:
+            braces: enable
+            brackets: enable
+            colons: enable
+            commas: enable
+            comments:
+              level: warning
+            comments-indentation: disable
+            document-end: disable
+            document-start: disable
+            empty-lines: enable
+            empty-values: disable
+            hyphens: enable
+            indentation: enable
+            key-duplicates: enable
+            key-ordering: disable
+            line-length:
+              max: 250
+              allow-non-breakable-words: true
+              allow-non-breakable-inline-mappings: false
+            new-line-at-end-of-file: enable
+            new-lines: enable
+            octal-values: disable
+            quoted-strings: disable
+            trailing-spaces: enable
+            truthy:
+              allowed-values: ['true', 'false', 'on']
+              level: error
+          EOF
+
+      - name: Cat yamllint file
+        if: ${{ inputs.debug }}
+        run: |
+          cat "${RUNNER_TEMP}/yamllint"
+
+      # This should automatically pick up the file in the temporary directory
+      # unless there is a a file named .yamllint, .yamllint.yaml, or
+      # .yamllint.yml in the current working directory, in which case it will be
+      # used.
+      - name: Run yamllint
+        working-directory: ./.github/workflows
+        env:
+          YAMLLINT_CONFIG_FILE: ${{ runner.temp }}/yamllint
+        run: |
+          yamllint  -- *.yaml
