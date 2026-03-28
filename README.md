@@ -44,5 +44,5 @@ permissions:
 
 jobs:
   build:
-    uses: stevemarple/workflows/.github/workflows/validate-workflows.yaml@main
+    uses: stevemarple/workflows/.github/workflows/validate-workflows.yaml@stable
 ~~~
