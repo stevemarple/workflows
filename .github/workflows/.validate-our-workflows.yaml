@@ -1,0 +1,16 @@
+name: Validate our own GitHub workflows
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Validate using the shared workflow but use a local reference so that this
+    # works for forks and uses the shared workflow from the same branch
+    uses: ./.github/workflows/validate-workflows.yaml
